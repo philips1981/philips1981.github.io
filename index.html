@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Marstek Venus E - Celspanningen uitlezen</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#121212; color:#fff; text-align:center; padding:20px; }
+  .card { background:#1e1e1e; max-width:480px; margin:20px auto; padding:25px; border-radius:15px; box-shadow:0 4px 15px rgba(0,0,0,.5); }
+  h1 { font-size:26px; margin-bottom:6px; }
+  .intro { color:#bbb; font-size:14px; line-height:1.45; margin:0 auto 6px; max-width:480px; }
+  button { background:#007bff; color:#fff; border:none; padding:12px 24px; font-size:16px; border-radius:8px; cursor:pointer; font-weight:bold; width:100%; margin-top:8px; }
+  button:hover { background:#0056b3; }
+  button:disabled { background:#444; cursor:default; }
+  button.small { width:auto; padding:6px 12px; font-size:12px; background:#333; margin-top:8px; }
+  button.small:hover { background:#444; }
+  .support { background:#4a2c00; color:#ffd9a0; border-radius:8px; padding:10px 12px; font-size:14px; line-height:1.4; margin:0 auto 14px; max-width:480px; }
+  .device-name { font-size:14px; color:#aaa; margin:12px 0 0; }
+  .status-line { display:inline-block; padding:10px 14px; font-size:14px; border-radius:8px; margin:12px 0 10px; width:90%; box-sizing:border-box; background:#2a2a2a; color:#ddd; }
+  .status-line.warning { background:#ef6c00; color:#fff; font-weight:bold; }
+  .status-line.error { background:#c62828; color:#fff; font-weight:bold; }
+  h2 { font-size:15px; text-align:left; color:#ddd; margin:16px 0 6px; font-weight:600; }
+  .soc-wrap { margin:6px 0 8px; text-align:left; }
+  .soc-bar { position:relative; height:34px; background:#2a2a2a; border-radius:8px; overflow:hidden; border:1px solid #3a3a3a; }
+  .soc-fill { height:100%; width:0; background:#1e88e5; transition:width .4s ease; }
+  .soc-text { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:18px; text-shadow:0 1px 3px rgba(0,0,0,.7); }
+  .info { font-size:15px; margin:6px 0; text-align:left; background:#2a2a2a; padding:9px 12px; border-radius:8px; display:flex; justify-content:space-between; gap:12px; }
+  .info .label { color:#bbb; }
+  .info .value { font-weight:bold; text-align:right; }
+  .cells { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:8px 0; }
+  .cell { background:#2a2a2a; border-radius:6px; padding:6px 2px; font-size:13px; line-height:1.3; border:2px solid transparent; }
+  .cell .name { display:block; font-size:11px; color:#999; }
+  .cell .val { font-weight:bold; }
+  .cell .mark { font-size:10px; color:#ccc; }
+  .cell.max { border-color:#bdbdbd; }
+  .cell.min { border-color:#bdbdbd; border-style:dashed; }
+  .cell-legend { font-size:12px; color:#999; text-align:left; margin:0 0 4px; }
+  details { text-align:left; background:#252525; border-radius:8px; padding:10px 14px; margin-top:14px; font-size:14px; color:#ddd; }
+  details summary { cursor:pointer; font-weight:bold; font-size:15px; color:#fff; }
+  details dl { margin:10px 0 0; }
+  details dt { font-weight:bold; margin-top:10px; color:#fff; }
+  details dd { margin:2px 0 0; color:#bbb; line-height:1.4; }
+  .disclaimer { margin-top:14px; padding-top:10px; border-top:1px solid #3a3a3a; font-size:12px; color:#999; line-height:1.45; }
+  .disclaimer a { color:#8ab4f8; }
+  .debug-log { background:#000; color:#0f0; font-family:monospace; font-size:11px; padding:10px; text-align:left; border-radius:5px; max-height:260px; overflow-y:auto; margin-top:10px; white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+<h1>🔋 Marstek Venus E<br>Celspanningen uitlezen</h1>
+<p class="intro">Leest de celspanningen en andere gegevens van je Marstek-batterij via Bluetooth. Alleen lezen. De pagina geeft geen oordeel over je batterij.</p>
+<p class="intro">Werkt in Chrome, Edge en Opera op een computer of Android. Sluit eerst de Marstek-app, want er kan maar één app tegelijk verbinden.</p>
+<p id="support" class="support" style="display:none">Deze browser ondersteunt Web Bluetooth niet. Gebruik Chrome, Edge of Opera op een computer of Android. Safari, Firefox en iPhone of iPad werken niet.</p>
+
+<div class="card">
+  <button id="connectBtn">🔌 Verbind via Bluetooth</button>
+  <button id="readBtn" disabled>🔄 Opnieuw lezen</button>
+
+  <div id="resultArea" style="display:none;">
+    <p id="deviceName" class="device-name"></p>
+    <div id="statusLine" class="status-line">Wachten op data...</div>
+
+    <h2>Celspanningen (mV)</h2>
+    <div id="cells" class="cells"></div>
+    <p class="cell-legend">▲ hoogste cel · ▼ laagste cel</p>
+
+    <h2>Samenvatting</h2>
+    <div class="info"><span class="label">Hoogste cel</span><span class="value"><span id="maxV">-</span></span></div>
+    <div class="info"><span class="label">Laagste cel</span><span class="value"><span id="minV">-</span></span></div>
+    <div class="info"><span class="label">Verschil hoogste - laagste</span><span class="value"><span id="deltaV">-</span></span></div>
+    <div class="info"><span class="label">Gemiddelde</span><span class="value"><span id="avgV">-</span></span></div>
+    <div class="info"><span class="label">Aantal cellen</span><span class="value"><span id="cellCount">-</span></span></div>
+
+    <h2>Pakspanning</h2>
+    <div class="info"><span class="label">Gemeld door de batterij</span><span class="value"><span id="packV">-</span></span></div>
+    <div class="info"><span class="label">Som van de cellen</span><span class="value"><span id="sumV">-</span></span></div>
+
+    <h2>Overige gegevens (zoals gemeld)</h2>
+    <div class="soc-wrap">
+      <div class="soc-bar">
+        <div id="socFill" class="soc-fill"></div>
+        <div id="socText" class="soc-text">-</div>
+      </div>
+    </div>
+    <div class="info"><span class="label">Laadstand (SOC)</span><span class="value"><span id="soc">-</span></span></div>
+    <div class="info"><span class="label">Gezondheid (SOH)</span><span class="value"><span id="soh">-</span></span></div>
+    <div class="info"><span class="label">Stroom</span><span class="value"><span id="current">-</span></span></div>
+    <div class="info"><span class="label">Temperaturen</span><span class="value"><span id="temps">-</span></span></div>
+
+    <details>
+      <summary>ℹ️ Wat zie je hier?</summary>
+      <dl>
+        <dt>Celspanningen</dt>
+        <dd>De spanning van elke cel in millivolt (3375 mV = 3,375 V). De ▲ en ▼ markeren alleen de hoogste en de laagste waarde.</dd>
+        <dt>Verschil hoogste - laagste</dt>
+        <dd>Het verschil tussen de hoogste en de laagste cel op het moment van meten.</dd>
+        <dt>Pakspanning en som van de cellen</dt>
+        <dd>De totale spanning die de batterij meldt, naast alle celspanningen bij elkaar opgeteld. Beide worden getoond zoals ze binnenkomen.</dd>
+        <dt>SOC en SOH</dt>
+        <dd>SOC is de laadstand: hoe vol de batterij is. SOH is de gezondheid ten opzichte van nieuw. Beide zijn schattingen van de batterij zelf.</dd>
+        <dt>Stroom en temperaturen</dt>
+        <dd>De stroom in ampère zoals de batterij die meldt, en vier temperatuursensoren plus de MOSFET (schakelelektronica).</dd>
+        <dt>Vergelijken</dt>
+        <dd>Celspanningen en het verschil hangen af van de laadstand en van de stroom op het moment van meten. Vergelijk metingen daarom alleen onder gelijke omstandigheden.</dd>
+      </dl>
+    </details>
+  </div>
+
+  <details>
+    <summary>🛠️ Technische log</summary>
+    <button id="copyLog" class="small">Kopieer log</button>
+    <div id="debugLog" class="debug-log">Log...</div>
+  </details>
+
+  <p class="disclaimer">
+    Onofficieel hulpmiddel, niet verbonden met Marstek. De pagina stuurt alleen het leescommando voor BMS-gegevens (0x14) en schrijft niets naar de batterij. Alle waarden komen rechtstreeks van de batterij en worden niet beoordeeld. Gebruik op eigen risico, zonder garantie. Voor vragen over de gezondheid van je batterij kun je terecht bij je leverancier of Marstek.
+    Het protocol is gebaseerd op het onderzoek van <a href="https://github.com/rweijnen/marstek-venus-monitor" target="_blank" rel="noopener">rweijnen/marstek-venus-monitor</a> (MIT-licentie).
+  </p>
+</div>
+
+<script>
+const SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb";
+const PREFERRED_WRITE = "0000ff01-0000-1000-8000-00805f9b34fb";
+const CMD_BMS = 0x14;
+const CELL_START = 52;      // 4 headerbytes + payload-offset 48
+const MAX_CONNECT_ATTEMPTS = 4;
+const MAX_READ_ROUNDS = 2;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const $ = id => document.getElementById(id);
+const hex = arr => Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join(' ');
+const PROP_NAMES = ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'];
+const propsOf = c => PROP_NAMES.filter(k => c.properties[k]).join(',') || '(geen)';
+
+if (!navigator.bluetooth) {
+  $('support').style.display = 'block';
+  $('connectBtn').disabled = true;
+}
+
+function log(msg) {
+  const d = $('debugLog');
+  d.textContent += "\n> " + msg;
+  d.scrollTop = d.scrollHeight;
+  console.log(msg);
+}
+
+function setStatus(text, cls) {
+  const s = $('statusLine');
+  s.textContent = text;
+  s.className = "status-line" + (cls ? " " + cls : "");
+}
+
+function setSoc(pct) {
+  if (pct === null) {
+    $('socFill').style.width = "0%";
+    $('socText').textContent = "-";
+    return;
+  }
+  const clamped = Math.max(0, Math.min(100, pct));
+  if (clamped !== pct) log("Let op: SOC " + pct + "% valt buiten 0-100, getoond als " + clamped + "%.");
+  $('socFill').style.width = clamped + "%";
+  $('socText').textContent = clamped + "%";
+}
+
+function buildFrame(cmd, payload = []) {
+  const f = [0x73, 5 + payload.length, 0x23, cmd, ...payload];
+  let x = 0;
+  for (const b of f) x ^= b;
+  f.push(x);
+  return new Uint8Array(f);
+}
+
+// Alle getallen in het antwoord zijn little-endian
+const u16 = (f, i) => f[i] | (f[i + 1] << 8);
+const s16 = (f, i) => { const v = u16(f, i); return v > 32767 ? v - 65536 : v; };
+
+let currentDevice = null;
+let writeChars = [];
+let buffer = [];
+let flushTimer = null;
+let rxCount = 0;
+let readToken = 0;
+let connecting = false;
+
+// Wis de metingen van de vorige batterij
+function resetResults() {
+  for (const id of ['maxV', 'minV', 'deltaV', 'avgV', 'cellCount', 'packV', 'sumV', 'soc', 'soh', 'current', 'temps']) {
+    $(id).textContent = "-";
+  }
+  $('cells').innerHTML = "";
+  setSoc(null);
+  setStatus("Wachten op data...");
+}
+
+function onNotify(event) {
+  rxCount++;
+  const dv = event.target.value;
+  const chunk = new Uint8Array(dv.buffer.slice(dv.byteOffset, dv.byteOffset + dv.byteLength));
+  log("RX van " + event.target.uuid.slice(4, 8) + " (" + chunk.length + "): " + hex(chunk));
+  buffer.push(...chunk);
+
+  while (buffer.length && buffer[0] !== 0x73) buffer.shift();
+
+  clearTimeout(flushTimer);
+  if (buffer.length >= 2 && buffer[1] >= 5 && buffer.length >= buffer[1]) {
+    processFrame(buffer.splice(0, buffer[1]));
+  } else {
+    flushTimer = setTimeout(() => {
+      if (buffer.length) {
+        log("Time-out: onvolledig frame (" + buffer.length + " bytes), toch proberen.");
+        processFrame(buffer.splice(0, buffer.length));
+      }
+    }, 1500);
+  }
+}
+
+function processFrame(f) {
+  log("Frame (" + f.length + " bytes): " + hex(f));
+  if (f.length < 6) { log("Te kort, genegeerd."); return; }
+  let x = 0;
+  for (let i = 0; i < f.length - 1; i++) x ^= f[i];
+  log("Checksum " + (x === f[f.length - 1] ? "OK" : "FOUT (verwacht " + x.toString(16) + ", kreeg " + f[f.length - 1].toString(16) + ")"));
+  if (f[3] !== CMD_BMS) { log("Ander commando (0x" + f[3].toString(16) + "), genegeerd."); return; }
+  parseBms(f);
+}
+
+function parseBms(f) {
+  const n = Math.floor((f.length - 1 - CELL_START) / 2);
+  if (n < 4) {
+    log("Te weinig data voor celspanningen (" + f.length + " bytes).");
+    setStatus("Data kon niet worden gelezen", "warning");
+    return;
+  }
+  const cells = [];
+  for (let i = 0; i < n; i++) cells.push(u16(f, CELL_START + 2 * i));
+  const bad = cells.filter(mv => mv < 2000 || mv > 4500);
+  if (bad.length) log("Let op: " + bad.length + " waarde(n) buiten 2000-4500 mV: " + bad.join(', '));
+
+  const max = Math.max(...cells), min = Math.min(...cells), delta = max - min;
+  const maxIdx = cells.indexOf(max), minIdx = cells.indexOf(min);
+  const sum = cells.reduce((a, b) => a + b, 0);
+
+  // Celraster
+  const grid = $('cells');
+  grid.innerHTML = "";
+  cells.forEach((mv, i) => {
+    const d = document.createElement('div');
+    d.className = "cell" + (i === maxIdx ? " max" : "") + (i === minIdx ? " min" : "");
+    const name = document.createElement('span');
+    name.className = "name";
+    name.textContent = "C" + (i + 1);
+    const val = document.createElement('span');
+    val.className = "val";
+    val.textContent = mv;
+    d.appendChild(name);
+    d.appendChild(val);
+    if (i === maxIdx || i === minIdx) {
+      const mark = document.createElement('span');
+      mark.className = "mark";
+      mark.textContent = i === maxIdx ? " ▲" : " ▼";
+      d.appendChild(mark);
+    }
+    grid.appendChild(d);
+  });
+
+  // Samenvatting
+  $('maxV').textContent = max + " mV (C" + (maxIdx + 1) + ")";
+  $('minV').textContent = min + " mV (C" + (minIdx + 1) + ")";
+  $('deltaV').textContent = delta + " mV";
+  $('avgV').textContent = (sum / cells.length).toFixed(0) + " mV";
+  $('cellCount').textContent = cells.length;
+
+  // Pakspanning
+  $('packV').textContent = (u16(f, 18) / 100).toFixed(2) + " V";
+  $('sumV').textContent = (sum / 1000).toFixed(2) + " V";
+
+  // Overige gegevens, zoals gemeld
+  const soc = u16(f, 12), soh = u16(f, 14);
+  setSoc(soc);
+  $('soc').textContent = soc + "%";
+  $('soh').textContent = soh + "%";
+  $('current').textContent = (s16(f, 20) / 10).toFixed(1) + " A";
+  const temps = [44, 46, 48, 50].map(i => u16(f, i));
+  $('temps').textContent = temps.join(" / ") + " °C (MOSFET " + u16(f, 42) + " °C)";
+
+  setStatus("Laatst gelezen om " + new Date().toLocaleTimeString('nl-BE'));
+}
+
+// Leescommando met retry: elke schrijfbare karakteristiek, maximaal MAX_READ_ROUNDS rondes.
+async function sendRead(idx = 0, token = ++readToken, round = 1) {
+  if (!writeChars.length) return;
+  if (idx >= writeChars.length) {
+    if (round < MAX_READ_ROUNDS) {
+      log("Geen antwoord, nieuwe ronde (" + (round + 1) + "/" + MAX_READ_ROUNDS + ")...");
+      await sleep(1000);
+      if (token !== readToken) return;
+      return sendRead(0, token, round + 1);
+    }
+    log("Geen antwoord van enige schrijfkarakteristiek.");
+    setStatus("Geen antwoord van de batterij", "warning");
+    return;
+  }
+  const c = writeChars[idx];
+  const frame = buildFrame(CMD_BMS);
+  buffer = [];
+  const rxBefore = rxCount;
+  log("TX naar " + c.uuid.slice(4, 8) + ": " + hex(frame));
+  try {
+    if (c.properties.write) await c.writeValue(frame);
+    else await c.writeValueWithoutResponse(frame);
+  } catch (e) {
+    log("Schrijffout op " + c.uuid.slice(4, 8) + ": " + e.name + ": " + e.message);
+  }
+  await sleep(2000);
+  if (token !== readToken) return;
+  if (rxCount === rxBefore) {
+    log("Geen antwoord na 2 s op " + c.uuid.slice(4, 8) + ".");
+    await sendRead(idx + 1, token, round);
+  }
+}
+
+// Eén verbindingspoging: GATT verbinden, service zoeken, op notify abonneren.
+async function setupConnection(device) {
+  writeChars = [];
+  const server = await device.gatt.connect();
+  await sleep(500);
+  const service = await server.getPrimaryService(SERVICE_UUID);
+  const chars = await service.getCharacteristics();
+
+  for (const c of chars) {
+    log("char " + c.uuid.slice(4, 8) + " [" + propsOf(c) + "]");
+    if (c.properties.write || c.properties.writeWithoutResponse) writeChars.push(c);
+  }
+  writeChars.sort((a, b) => (b.uuid === PREFERRED_WRITE) - (a.uuid === PREFERRED_WRITE));
+
+  let subscribed = 0;
+  for (const c of chars) {
+    if (c.properties.notify || c.properties.indicate) {
+      c.addEventListener('characteristicvaluechanged', onNotify);
+      await c.startNotifications();
+      subscribed++;
+      log("Geabonneerd op " + c.uuid.slice(4, 8));
+    }
+  }
+  if (!subscribed) throw new Error("Geen notify-karakteristiek beschikbaar.");
+  if (!writeChars.length) throw new Error("Geen schrijfbare karakteristiek.");
+}
+
+async function connectWithRetry(device) {
+  for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS; attempt++) {
+    setStatus("Verbinden (poging " + attempt + "/" + MAX_CONNECT_ATTEMPTS + ")...");
+    log("Verbindingspoging " + attempt + "/" + MAX_CONNECT_ATTEMPTS);
+    try {
+      await setupConnection(device);
+      log("Verbonden.");
+      return true;
+    } catch (e) {
+      log("Poging " + attempt + " mislukt: " + e.name + ": " + e.message);
+      try { if (device.gatt.connected) device.gatt.disconnect(); } catch (_) {}
+      if (attempt < MAX_CONNECT_ATTEMPTS) {
+        const wait = 1000 * attempt;
+        log("Wacht " + wait / 1000 + " s voor volgende poging...");
+        await sleep(wait);
+      }
+    }
+  }
+  return false;
+}
+
+$('connectBtn').addEventListener('click', async () => {
+  if (connecting) return;
+  connecting = true;
+  try {
+    // 1. Eerst de keuzelijst tonen. Annuleer je, dan blijft de huidige verbinding gewoon bestaan.
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'MST_' }, { namePrefix: 'MST-' }],
+      optionalServices: [SERVICE_UUID]
+    });
+
+    // 2. Pas nu de vorige batterij loskoppelen en het scherm leegmaken
+    readToken++;                          // lopende leesacties stoppen
+    clearTimeout(flushTimer);
+    buffer = [];
+    const previous = currentDevice;
+    currentDevice = null;                 // voorkomt "verbroken"-melding bij eigen disconnect
+    if (previous && previous.gatt.connected) {
+      log("Vorige batterij (" + previous.name + ") loskoppelen...");
+      previous.gatt.disconnect();
+      await sleep(1000);
+    }
+    $('readBtn').disabled = true;
+    $('debugLog').textContent = "Start...";
+    resetResults();
+    rxCount = 0;
+
+    currentDevice = device;
+    $('resultArea').style.display = 'block';
+    $('deviceName').textContent = "Batterij: " + device.name;
+    log("Gekozen: " + device.name);
+    device.addEventListener('gattserverdisconnected', () => {
+      if (device !== currentDevice || connecting) return;   // eigen disconnect of retry: negeren
+      log("!! Verbinding verbroken");
+      setStatus("Verbinding verbroken", "warning");
+      $('readBtn').disabled = true;
+    });
+
+    // 3. Verbinden met retry
+    const ok = await connectWithRetry(device);
+    if (!ok) {
+      setStatus("Verbinden mislukt. Sluit andere apps die de batterij gebruiken en probeer opnieuw.", "error");
+      log("Alle pogingen mislukt.");
+      return;
+    }
+
+    setStatus("Data opvragen...");
+    $('readBtn').disabled = false;
+    await sleep(300);
+    connecting = false;
+    await sendRead();
+  } catch (e) {
+    if (e.name === "NotFoundError") log("Geen batterij gekozen, huidige verbinding blijft zoals ze was.");
+    else log("FOUT: " + e.name + ": " + e.message);
+  } finally {
+    connecting = false;
+  }
+});
+
+$('readBtn').addEventListener('click', () => sendRead());
+
+$('copyLog').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('debugLog').textContent);
+    log("Log gekopieerd.");
+  } catch (e) {
+    log("Kopiëren mislukt: " + e.message);
+  }
+});
+</script>
+</body>
+</html>
