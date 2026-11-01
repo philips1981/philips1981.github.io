@@ -14,9 +14,12 @@
   button:disabled { background:#444; cursor:default; }
   button.small { width:auto; padding:6px 12px; font-size:12px; background:#333; margin-top:8px; }
   button.small:hover { background:#444; }
+  button.link { width:auto; background:none; color:#8ab4f8; font-size:13px; font-weight:normal; text-decoration:underline; padding:8px 4px; margin-top:4px; }
+  button.link:hover { background:none; color:#b3d1ff; }
+  button.link:disabled { color:#666; }
   .support { background:#4a2c00; color:#ffd9a0; border-radius:8px; padding:10px 12px; font-size:14px; line-height:1.4; margin:0 auto 14px; max-width:480px; }
   .device-name { font-size:14px; color:#aaa; margin:12px 0 0; }
-  .status-line { display:inline-block; padding:10px 14px; font-size:14px; border-radius:8px; margin:12px 0 10px; width:90%; box-sizing:border-box; background:#2a2a2a; color:#ddd; }
+  .status-line { display:inline-block; padding:10px 14px; font-size:14px; border-radius:8px; margin:12px 0 10px; width:90%; box-sizing:border-box; background:#2a2a2a; color:#ddd; line-height:1.4; }
   .status-line.warning { background:#ef6c00; color:#fff; font-weight:bold; }
   .status-line.error { background:#c62828; color:#fff; font-weight:bold; }
   h2 { font-size:15px; text-align:left; color:#ddd; margin:16px 0 6px; font-weight:600; }
@@ -53,6 +56,7 @@
 
 <div class="card">
   <button id="connectBtn">🔌 Verbind via Bluetooth</button>
+  <button id="connectAllBtn" class="link">Staat je batterij er niet bij? Toon alle MST-apparaten</button>
   <button id="readBtn" disabled>🔄 Opnieuw lezen</button>
 
   <div id="resultArea" style="display:none;">
@@ -125,6 +129,12 @@ const CELL_START = 52;      // 4 headerbytes + payload-offset 48
 const MAX_CONNECT_ATTEMPTS = 4;
 const MAX_READ_ROUNDS = 2;
 
+// Zoekfilters voor de Bluetooth-keuzelijst.
+// Standaard: namen van bekende batterijen. P1-meters (bv. MST-SMR_...) vallen hierbuiten.
+const FILTERS_BATTERY = [{ namePrefix: 'MST_' }, { namePrefix: 'MST-TPM' }];
+// Reserve: alle apparaten met een MST-naam, voor batterijen met een andere naam.
+const FILTERS_ALL = [{ namePrefix: 'MST_' }, { namePrefix: 'MST-' }];
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
 const hex = arr => Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join(' ');
@@ -134,6 +144,7 @@ const propsOf = c => PROP_NAMES.filter(k => c.properties[k]).join(',') || '(geen
 if (!navigator.bluetooth) {
   $('support').style.display = 'block';
   $('connectBtn').disabled = true;
+  $('connectAllBtn').disabled = true;
 }
 
 function log(msg) {
@@ -181,7 +192,7 @@ let rxCount = 0;
 let readToken = 0;
 let connecting = false;
 
-// Wis de metingen van de vorige batterij
+// Wis de metingen van het vorige apparaat
 function resetResults() {
   for (const id of ['maxV', 'minV', 'deltaV', 'avgV', 'cellCount', 'packV', 'sumV', 'soc', 'soh', 'current', 'temps']) {
     $(id).textContent = "-";
@@ -296,7 +307,7 @@ async function sendRead(idx = 0, token = ++readToken, round = 1) {
       return sendRead(0, token, round + 1);
     }
     log("Geen antwoord van enige schrijfkarakteristiek.");
-    setStatus("Geen antwoord van de batterij", "warning");
+    setStatus("Geen antwoord op het leescommando. Controleer of dit wel een batterij is: een P1-meter of ander Marstek-apparaat antwoordt hier niet op.", "warning");
     return;
   }
   const c = writeChars[idx];
@@ -366,24 +377,24 @@ async function connectWithRetry(device) {
   return false;
 }
 
-$('connectBtn').addEventListener('click', async () => {
+async function startConnect(filters) {
   if (connecting) return;
   connecting = true;
   try {
     // 1. Eerst de keuzelijst tonen. Annuleer je, dan blijft de huidige verbinding gewoon bestaan.
     const device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: 'MST_' }, { namePrefix: 'MST-' }],
+      filters: filters,
       optionalServices: [SERVICE_UUID]
     });
 
-    // 2. Pas nu de vorige batterij loskoppelen en het scherm leegmaken
+    // 2. Pas nu het vorige apparaat loskoppelen en het scherm leegmaken
     readToken++;                          // lopende leesacties stoppen
     clearTimeout(flushTimer);
     buffer = [];
     const previous = currentDevice;
     currentDevice = null;                 // voorkomt "verbroken"-melding bij eigen disconnect
     if (previous && previous.gatt.connected) {
-      log("Vorige batterij (" + previous.name + ") loskoppelen...");
+      log("Vorig apparaat (" + previous.name + ") loskoppelen...");
       previous.gatt.disconnect();
       await sleep(1000);
     }
@@ -394,7 +405,7 @@ $('connectBtn').addEventListener('click', async () => {
 
     currentDevice = device;
     $('resultArea').style.display = 'block';
-    $('deviceName').textContent = "Batterij: " + device.name;
+    $('deviceName').textContent = "Apparaat: " + device.name;
     log("Gekozen: " + device.name);
     device.addEventListener('gattserverdisconnected', () => {
       if (device !== currentDevice || connecting) return;   // eigen disconnect of retry: negeren
@@ -406,7 +417,7 @@ $('connectBtn').addEventListener('click', async () => {
     // 3. Verbinden met retry
     const ok = await connectWithRetry(device);
     if (!ok) {
-      setStatus("Verbinden mislukt. Sluit andere apps die de batterij gebruiken en probeer opnieuw.", "error");
+      setStatus("Verbinden mislukt. Sluit andere apps die het apparaat gebruiken en probeer opnieuw.", "error");
       log("Alle pogingen mislukt.");
       return;
     }
@@ -417,13 +428,15 @@ $('connectBtn').addEventListener('click', async () => {
     connecting = false;
     await sendRead();
   } catch (e) {
-    if (e.name === "NotFoundError") log("Geen batterij gekozen, huidige verbinding blijft zoals ze was.");
+    if (e.name === "NotFoundError") log("Geen apparaat gekozen, huidige verbinding blijft zoals ze was.");
     else log("FOUT: " + e.name + ": " + e.message);
   } finally {
     connecting = false;
   }
-});
+}
 
+$('connectBtn').addEventListener('click', () => startConnect(FILTERS_BATTERY));
+$('connectAllBtn').addEventListener('click', () => startConnect(FILTERS_ALL));
 $('readBtn').addEventListener('click', () => sendRead());
 
 $('copyLog').addEventListener('click', async () => {
