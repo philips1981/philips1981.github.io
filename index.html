@@ -100,7 +100,7 @@
         <dt>Pakspanning en som van de cellen</dt>
         <dd>De totale spanning die de batterij meldt, naast alle celspanningen bij elkaar opgeteld. Beide worden getoond zoals ze binnenkomen.</dd>
         <dt>SOC en SOH</dt>
-        <dd>SOC is de laadstand: hoe vol de batterij is. SOH is de gezondheid ten opzichte van nieuw. Beide zijn schattingen van de batterij zelf. Niet elke batterij meldt de SOH op dezelfde manier. Sommige sturen een waarde in tienden van een procent (994 betekent dan 99,4%): de pagina herkent dat aan een waarde boven 100, rekent het om en toont de ruwe waarde ernaast. Bij sommige v3-batterijen (naam begint met MST_VNSE3) staat in het SOH-veld een 0. Dan toont de pagina "Niet beschikbaar", omdat we niet weten of en waar die batterij de SOH meldt.</dd>
+        <dd>SOC is de laadstand: hoe vol de batterij is. SOH is de gezondheid ten opzichte van nieuw. Beide zijn schattingen van de batterij zelf. Sommige batterijen melden de SOH in tienden van een procent. Staat er "99.4% (veld 994)", dan heeft de batterij 994 gestuurd en toont de pagina dat omgerekend. Stuurt een batterij een 0, dan toont de pagina "Niet beschikbaar".</dd>
         <dt>Stroom en temperaturen</dt>
         <dd>De stroom in ampère zoals de batterij die meldt, en vier temperatuursensoren plus de MOSFET (schakelelektronica). De v3 meldt temperaturen in tienden van graden, de pagina rekent dat om.</dd>
         <dt>Vergelijken</dt>
@@ -179,8 +179,9 @@ function setSoc(pct) {
 
 // SOH: sommige batterijen sturen tienden van een procent (994 = 99.4%).
 // Een SOH boven 100% bestaat niet, dus een waarde van 101 tot 1000 lezen we als tienden.
+// Een 0 tonen we als "niet beschikbaar", ongeacht het model.
 function formatSoh(raw) {
-  if (raw === 0 && modelV3) return "Niet beschikbaar (veld is 0)";
+  if (raw === 0) return "Niet beschikbaar (veld is 0)";
   if (raw > 100 && raw <= 1000) return (raw / 10).toFixed(1) + "% (veld " + raw + ")";
   if (raw > 1000) return raw + " (veld, eenheid onbekend)";
   return raw + "%";
