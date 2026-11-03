@@ -100,7 +100,7 @@
         <dt>Pakspanning en som van de cellen</dt>
         <dd>De totale spanning die de batterij meldt, naast alle celspanningen bij elkaar opgeteld. Beide worden getoond zoals ze binnenkomen.</dd>
         <dt>SOC en SOH</dt>
-        <dd>SOC is de laadstand: hoe vol de batterij is. SOH is de gezondheid ten opzichte van nieuw. Beide zijn schattingen van de batterij zelf. Bij de v3 (naam begint met MST_VNSE3) staat in het SOH-veld een 0. Dan toont de pagina "Niet beschikbaar", omdat we niet weten of en waar die batterij de SOH meldt.</dd>
+        <dd>SOC is de laadstand: hoe vol de batterij is. SOH is de gezondheid ten opzichte van nieuw. Beide zijn schattingen van de batterij zelf. Niet elke batterij meldt de SOH op dezelfde manier. Sommige sturen een waarde in tienden van een procent (994 betekent dan 99,4%): de pagina herkent dat aan een waarde boven 100, rekent het om en toont de ruwe waarde ernaast. Bij sommige v3-batterijen (naam begint met MST_VNSE3) staat in het SOH-veld een 0. Dan toont de pagina "Niet beschikbaar", omdat we niet weten of en waar die batterij de SOH meldt.</dd>
         <dt>Stroom en temperaturen</dt>
         <dd>De stroom in ampère zoals de batterij die meldt, en vier temperatuursensoren plus de MOSFET (schakelelektronica). De v3 meldt temperaturen in tienden van graden, de pagina rekent dat om.</dd>
         <dt>Vergelijken</dt>
@@ -136,7 +136,7 @@ const FILTERS_BATTERY = [{ namePrefix: 'MST_' }, { namePrefix: 'MST-TPM' }];
 const FILTERS_ALL = [{ namePrefix: 'MST_' }, { namePrefix: 'MST-' }];
 
 // Modellen die afwijken van de v2. Herkend aan het begin van de Bluetooth-naam.
-// v3: temperaturen in tienden van graden, en een 0 in het SOH-veld.
+// v3: temperaturen in tienden van graden.
 const V3_PREFIXES = ['MST_VNSE3'];
 const isV3 = name => V3_PREFIXES.some(p => (name || '').toUpperCase().startsWith(p));
 
@@ -175,6 +175,15 @@ function setSoc(pct) {
   if (clamped !== pct) log("Let op: SOC " + pct + "% valt buiten 0-100, getoond als " + clamped + "%.");
   $('socFill').style.width = clamped + "%";
   $('socText').textContent = clamped + "%";
+}
+
+// SOH: sommige batterijen sturen tienden van een procent (994 = 99.4%).
+// Een SOH boven 100% bestaat niet, dus een waarde van 101 tot 1000 lezen we als tienden.
+function formatSoh(raw) {
+  if (raw === 0 && modelV3) return "Niet beschikbaar (veld is 0)";
+  if (raw > 100 && raw <= 1000) return (raw / 10).toFixed(1) + "% (veld " + raw + ")";
+  if (raw > 1000) return raw + " (veld, eenheid onbekend)";
+  return raw + "%";
 }
 
 function buildFrame(cmd, payload = []) {
@@ -298,14 +307,15 @@ function parseBms(f) {
   const tempsRaw = [44, 46, 48, 50].map(i => s16(f, i));
   const mosRaw = s16(f, 42);
   log("Ruwe waarden: SOH-veld=" + soh + ", temperatuurvelden=" + tempsRaw.join("/") + ", MOSFET-veld=" + mosRaw + (modelV3 ? " (v3-weergave)" : ""));
+  if (soh > 100 && soh <= 1000) log("SOH-veld " + soh + " is groter dan 100: gelezen als tienden van een procent (" + (soh / 10).toFixed(1) + "%).");
+
+  $('soh').textContent = formatSoh(soh);
 
   if (modelV3) {
-    // v3: temperaturen in tienden van graden, en een 0 in het SOH-veld
-    $('soh').textContent = soh === 0 ? "Niet beschikbaar (veld is 0)" : soh + "%";
+    // v3: temperaturen in tienden van graden
     const fmt = v => (v / 10).toFixed(1);
     $('temps').textContent = tempsRaw.map(fmt).join(" / ") + " °C (MOSFET " + fmt(mosRaw) + " °C)";
   } else {
-    $('soh').textContent = soh + "%";
     $('temps').textContent = tempsRaw.join(" / ") + " °C (MOSFET " + mosRaw + " °C)";
   }
 
@@ -425,7 +435,7 @@ async function startConnect(filters) {
     modelV3 = isV3(device.name);
     $('resultArea').style.display = 'block';
     $('deviceName').textContent = "Apparaat: " + device.name;
-    log("Gekozen: " + device.name + (modelV3 ? " (v3 herkend: temperaturen in tienden van graden, SOH-veld apart behandeld)" : ""));
+    log("Gekozen: " + device.name + (modelV3 ? " (v3 herkend: temperaturen in tienden van graden)" : ""));
     device.addEventListener('gattserverdisconnected', () => {
       if (device !== currentDevice || connecting) return;   // eigen disconnect of retry: negeren
       log("!! Verbinding verbroken");
